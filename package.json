@@ -1,0 +1,36 @@
+{
+  "name": "initial",
+  "version": "1.0.0",
+  "description": "Blockathon project",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "test": "nodemon app",
+    "nodemon": "script"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Decentralized-Electoral-Board/Initial.git"
+  },
+  "keywords": [
+    "Election"
+  ],
+  "author": "Voteton",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Decentralized-Electoral-Board/Initial/issues"
+  },
+  "homepage": "https://github.com/Decentralized-Electoral-Board/Initial#readme",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "jsonwebtoken": "^9.0.2",
+    "moment": "^2.30.1",
+    "mysql2": "^3.11.3",
+    "nodemailer": "^6.9.16",
+    "nodemon": "^3.1.7"
+  }
+}
