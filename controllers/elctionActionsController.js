@@ -1,5 +1,4 @@
 import {db} from "../config/db.js";
-
 import moment from "moment";
 import { authenticateAdmin } from "./adminAuthentication.js";
 import multer from "multer";
@@ -14,7 +13,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 const cpUpload = upload.single('photo');
-
+ 
 export const newPoll = (req, res) => {
     upload.array('candidatePhotos')(req, res, async (err) => {
         if (err instanceof multer.MulterError) {
@@ -22,60 +21,82 @@ export const newPoll = (req, res) => {
         } else if (err) {
             return res.status(500).json({ message: 'Unknown error', error: err });
         }
+        const { description, categories } = req.body;
+        
+        if (!description || !categories) {
+            return res.status(400).json({ message: 'Description and categories are required' });
+        }
+        try {
+            const parsedCategories = typeof categories === 'string' ? JSON.parse(categories) : categories;
 
-        authenticateAdmin(req, res, () => {
-            const { description, categories } = req.body;
-            let photoIndex = 0;
-            const checkPoll = 'SELECT * FROM polls WHERE description = ?';
-            db.execute(checkPoll, [description], (err, results) => {
-                if (err) return res.status(500).json({ message: 'Database error' });
-                if (results.length > 0) {
-                    return res.status(400).json({ message: 'Poll already exists' }); 
-                } 
-                else {
+            authenticateAdmin(req, res, () => {
+                let photoIndex = 0;
+                const checkPoll = 'SELECT * FROM polls WHERE description = ?';
+                
+                db.execute(checkPoll, [description], (err, results) => {
+                    if (err) return res.status(500).json({ message: 'Database error', error: err });
+                    if (results.length > 0) {
+                        return res.status(400).json({ message: 'Poll already exists' }); 
+                    } 
                     const createPoll = "INSERT INTO polls (`description`, `created_at`) VALUES (?)";     
-                    const values = [
-                        req.body.description,
+                    const pollValues = [
+                        description,
                         moment(Date.now()).format("YYYY-MM-DD HH:mm:ss")
-                    ]
-                    db.query(createPoll, [values], (err, newPoll) => {
-                        if (err) return res.status(500).json(err);
+                    ];
+                    db.query(createPoll, [pollValues], (err, newPoll) => {
+                        if (err) return res.status(500).json({ message: 'Error creating poll', error: err }); 
                         const pollId = newPoll.insertId;
-                        const categoryPromises = categories.map(category => {
+                        const categoryPromises = parsedCategories.map(category => {
                             return new Promise((resolve, reject) => {
+                                if (!category.name) {
+                                    reject(new Error('Category name is required'));
+                                    return;
+                                }
                                 const createCategory = "INSERT INTO poll_categories (poll_id, category_name) VALUES (?, ?)";
                                 db.query(createCategory, [pollId, category.name], (err, categoryResult) => {
-                                    if (err) reject(err);
+                                    if (err) {
+                                        reject(err);
+                                        return;
+                                    }
                                     const categoryId = categoryResult.insertId;
                                     const candidatePromises = category.candidates.map(candidate => {
                                         return new Promise((resolve, reject) => {
-                                            const photoPath = req.files[photoIndex] ? 
+                                            if (!candidate.name) {
+                                                reject(new Error('Candidate name is required'));
+                                                return;
+                                            }
+                                            const photoPath = req.files && req.files[photoIndex] ? 
                                                 `/uploads/candidates/${req.files[photoIndex].filename}` : 
                                                 null;
                                             photoIndex++;
 
                                             const createCandidate = `
                                                 INSERT INTO candidates 
-                                                (category_id, name, description, photo_url) 
+                                                (category_id, name, description, photo) 
                                                 VALUES (?, ?, ?, ?)
                                             `;
-                                            db.query(createCandidate, [
+
+                                            const candidateValues = [
                                                 categoryId,
                                                 candidate.name,
-                                                candidate.description,
+                                                candidate.description || null,
                                                 photoPath
-                                            ], (err, result) => {
+                                            ];
+
+                                            db.query(createCandidate, candidateValues, (err, result) => {
                                                 if (err) reject(err);
-                                                resolve(result);
+                                                else resolve(result);
                                             });
                                         });
                                     });
+
                                     Promise.all(candidatePromises)
                                         .then(() => resolve())
                                         .catch(err => reject(err));
                                 }); 
                             });
                         });
+
                         Promise.all(categoryPromises)
                             .then(() => {
                                 res.status(200).json({
@@ -86,13 +107,15 @@ export const newPoll = (req, res) => {
                             .catch(err => {
                                 res.status(500).json({
                                     message: "Error creating poll categories and candidates",
-                                    error: err
+                                    error: err.message
                                 });
                             });
                     });
-                }
+                });
             });
-        });
+        } catch (error) {
+            return res.status(400).json({ message: 'Invalid categories format', error: error.message });
+        }
     });
 };
 
