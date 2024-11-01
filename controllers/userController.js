@@ -29,5 +29,5 @@ export const verifySocial = (req, res) => {
             return res.status(404).json('Wallet address not found');
         }
         res.send({ message: 'User profile updated successfully', walletAddress, socialMediaLink });
-    });
+    }); 
 }
