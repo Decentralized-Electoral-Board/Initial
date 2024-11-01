@@ -13,112 +13,131 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 const cpUpload = upload.single('photo');
- 
-export const newPoll = (req, res) => {
-    upload.array('candidatePhotos')(req, res, async (err) => {
-        if (err instanceof multer.MulterError) {
-            return res.status(400).json({ message: 'File upload error', error: err });
-        } else if (err) {
-            return res.status(500).json({ message: 'Unknown error', error: err });
+
+ //API functions
+ export const createElection = (req, res) => {
+    const { description, categories } = req.body;
+    if (!description || !categories || !Array.isArray(categories) || categories.length === 0) {
+        return res.status(400).json({ 
+            message: 'Description and categories array with at least one item are required' 
+        });
+    }
+    for (let category of categories) {
+        if (!category.name) {
+            return res.status(400).json({ 
+                message: 'Each category must have a valid name' 
+            });
         }
-        const { description, categories } = req.body;
-        
-        if (!description || !categories) {
-            return res.status(400).json({ message: 'Description and categories are required' });
+    }
+    const checkPoll = 'SELECT * FROM polls WHERE description = ?';
+    db.execute(checkPoll, [description], (err, results) => {
+        if (err) return res.status(500).json({ message: 'Database error', error: err });
+        if (results.length > 0) {
+            return res.status(400).json({ message: 'Poll already exists' }); 
         }
-        try {
-            const parsedCategories = typeof categories === 'string' ? JSON.parse(categories) : categories;
-
-            authenticateAdmin(req, res, () => {
-                let photoIndex = 0;
-                const checkPoll = 'SELECT * FROM polls WHERE description = ?';
-                
-                db.execute(checkPoll, [description], (err, results) => {
-                    if (err) return res.status(500).json({ message: 'Database error', error: err });
-                    if (results.length > 0) {
-                        return res.status(400).json({ message: 'Poll already exists' }); 
-                    } 
-                    const createPoll = "INSERT INTO polls (`description`, `created_at`) VALUES (?)";     
-                    const pollValues = [
-                        description,
-                        moment(Date.now()).format("YYYY-MM-DD HH:mm:ss")
-                    ];
-                    db.query(createPoll, [pollValues], (err, newPoll) => {
-                        if (err) return res.status(500).json({ message: 'Error creating poll', error: err }); 
-                        const pollId = newPoll.insertId;
-                        const categoryPromises = parsedCategories.map(category => {
-                            return new Promise((resolve, reject) => {
-                                if (!category.name) {
-                                    reject(new Error('Category name is required'));
-                                    return;
-                                }
-                                const createCategory = "INSERT INTO poll_categories (poll_id, category_name) VALUES (?, ?)";
-                                db.query(createCategory, [pollId, category.name], (err, categoryResult) => {
-                                    if (err) {
-                                        reject(err);
-                                        return;
-                                    }
-                                    const categoryId = categoryResult.insertId;
-                                    const candidatePromises = category.candidates.map(candidate => {
-                                        return new Promise((resolve, reject) => {
-                                            if (!candidate.name) {
-                                                reject(new Error('Candidate name is required'));
-                                                return;
-                                            }
-                                            const photoPath = req.files && req.files[photoIndex] ? 
-                                                `/uploads/candidates/${req.files[photoIndex].filename}` : 
-                                                null;
-                                            photoIndex++;
-
-                                            const createCandidate = `
-                                                INSERT INTO candidates 
-                                                (category_id, name, description, photo) 
-                                                VALUES (?, ?, ?, ?)
-                                            `;
-
-                                            const candidateValues = [
-                                                categoryId,
-                                                candidate.name,
-                                                candidate.description || null,
-                                                photoPath
-                                            ];
-
-                                            db.query(createCandidate, candidateValues, (err, result) => {
-                                                if (err) reject(err);
-                                                else resolve(result);
-                                            });
-                                        });
-                                    });
-
-                                    Promise.all(candidatePromises)
-                                        .then(() => resolve())
-                                        .catch(err => reject(err));
-                                }); 
-                            });
-                        });
-
-                        Promise.all(categoryPromises)
-                            .then(() => {
-                                res.status(200).json({
-                                    message: "Poll created successfully",
-                                    pollId: pollId
-                                });
-                            })
-                            .catch(err => {
-                                res.status(500).json({
-                                    message: "Error creating poll categories and candidates",
-                                    error: err.message
-                                });
-                            });
+        const createPoll = "INSERT INTO polls (`description`, `created_at`) VALUES (?, ?)";     
+        const pollValues = [
+            description,
+            moment(Date.now()).format("YYYY-MM-DD HH:mm:ss")
+        ];
+        db.query(createPoll, pollValues, (err, newPoll) => {
+            if (err) return res.status(500).json({ 
+                message: 'Error creating poll', 
+                error: err 
+            });
+            const pollId = newPoll.insertId;
+            const categoryPromises = categories.map(category => {
+                return new Promise((resolve, reject) => {
+                    const createCategory = "INSERT INTO poll_categories (poll_id, category_name) VALUES (?, ?)";
+                    db.query(createCategory, [pollId, category.name], (err, result) => {
+                        if (err) reject(err);
+                        else resolve(result);
                     });
                 });
             });
-        } catch (error) {
-            return res.status(400).json({ message: 'Invalid categories format', error: error.message });
+            Promise.all(categoryPromises)
+                .then(() => {
+                    res.status(200).json({
+                        message: "Election created successfully",
+                        pollId: pollId
+                    });
+                })
+                .catch(err => {
+                    res.status(500).json({
+                        message: "Error creating poll categories",
+                        error: err.message
+                    });
+                });
+        });
+    });
+};
+  
+export const getElectionCategories = (req, res) => {
+    const pollId = req.params.pollId;
+
+    const query = `
+        SELECT id, category_name 
+        FROM poll_categories 
+        WHERE poll_id = ?
+    `;
+    db.query(query, [pollId], (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                message: "Error fetching categories",
+                error: err
+            });
         }
+        res.status(200).json({
+            message: "Categories fetched successfully",
+            categories: results
+        });
     });
 };
 
+export const addCandidate = (req, res) => {
+    const upload = multer({ storage: storage }).single('photo');
+
+    upload(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+            return res.status(400).json({ message: 'File upload error', error: err.message });
+        } else if (err) {
+            return res.status(500).json({ message: 'Unknown upload error', error: err.message });
+        }
+
+        const { categoryId, name, description } = req.body;
+
+        // Validate required fields
+        if (!categoryId || !name) {
+            return res.status(400).json({
+                message: 'Category ID and candidate name are required'
+            });
+        }
+        const photoPath = req.file ? `/uploads/candidates/${req.file.filename}` : null;
+        const createCandidate = `
+            INSERT INTO candidates 
+            (category_id, name, description, photo) 
+            VALUES (?, ?, ?, ?)
+        `;
+        const candidateValues = [
+            categoryId,
+            name,
+            description || null,
+            photoPath
+        ];
+        db.query(createCandidate, candidateValues, (err, result) => {
+            if (err) {
+                return res.status(500).json({
+                    message: "Error creating candidate",
+                    error: err
+                });
+            }
+            res.status(200).json({
+                message: "Candidate added successfully",
+                candidateId: result.insertId
+            });
+        });
+    });
+};
 
 export const getAllElections = (req, res) => {
     const query = `
@@ -131,7 +150,7 @@ export const getAllElections = (req, res) => {
             c.id AS candidate_id,
             c.name AS candidate_name,
             c.description AS candidate_description,
-            c.photo_url AS candidate_photo
+            c.photo AS candidate_photo
         FROM polls p
         LEFT JOIN poll_categories pc ON p.id = pc.poll_id
         LEFT JOIN candidates c ON pc.id = c.category_id
@@ -146,13 +165,12 @@ export const getAllElections = (req, res) => {
             });
         }
 
-        // Transform the flat results into a nested structure
         const elections = [];
         let currentPoll = null;
         let currentCategory = null;
 
         results.forEach(row => {
-            // If this is a new poll
+            // Check if we're processing a new poll
             if (!currentPoll || currentPoll.id !== row.poll_id) {
                 currentPoll = {
                     id: row.poll_id,
@@ -161,10 +179,10 @@ export const getAllElections = (req, res) => {
                     categories: []
                 };
                 elections.push(currentPoll);
-                currentCategory = null;
+                currentCategory = null; // Reset category for each new poll
             }
 
-            // If this is a new category
+            // Check if we're processing a new category
             if (row.category_id && (!currentCategory || currentCategory.id !== row.category_id)) {
                 currentCategory = {
                     id: row.category_id,
@@ -174,8 +192,8 @@ export const getAllElections = (req, res) => {
                 currentPoll.categories.push(currentCategory);
             }
 
-            // Add candidate if it exists
-            if (row.candidate_id) {
+            // Only add candidate if a valid category exists
+            if (currentCategory && row.candidate_id) {
                 currentCategory.candidates.push({
                     id: row.candidate_id,
                     name: row.candidate_name,
@@ -191,6 +209,7 @@ export const getAllElections = (req, res) => {
         });
     });
 };
+
 
 // Get a specific election by ID
 export const getElectionById = (req, res) => {
