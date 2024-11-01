@@ -6,7 +6,7 @@ import {db} from "./config/db.js"
 
 //ROUTES
 import adminAuthRoute from "./routes/authenticationRoute.js"
-import newElectionRoute from "./routes/addElection.js"
+import newElectionRoute from "./routes/electionActionsRoute.js"
 import userRoutes from "./routes/userRoutes.js"
 
 const app = express();
